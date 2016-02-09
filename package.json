@@ -3,8 +3,13 @@
   "version": "0.0.1",
   "description": "HMAC URL signing middleware for Express/Connect",
   "main": "index.js",
+  "engines": {
+    "node": ">= 4.0"
+  },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "./node_modules/.bin/mocha --trace-deprecation --check-leaks --bail",
+    "coverage": "./vagrant/scripts/test-coverage",
+    "travis": "./vagrant/scripts/test-travis"
   },
   "repository": {
     "type": "git",
@@ -24,5 +29,13 @@
   "bugs": {
     "url": "https://github.com/smebberson/hsu/issues"
   },
-  "homepage": "https://github.com/smebberson/hsu#readme"
+  "homepage": "https://github.com/smebberson/hsu#readme",
+  "devDependencies": {
+    "chai": "3.5.0",
+    "cookie-session": "2.0.0-alpha.1",
+    "express": "4.13.4",
+    "istanbul": "0.4.2",
+    "mocha": "2.4.5",
+    "supertest": "1.1.0"
+  }
 }
