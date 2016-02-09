@@ -1,0 +1,9 @@
+{
+    "hostname": "hsu.local",
+    "ip": "192.168.88.14",
+    "memory": 1024,
+    "cpus": 1,
+    "env": {
+        "NODE_ENV": "development"
+    }
+}

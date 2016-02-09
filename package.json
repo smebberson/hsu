@@ -1,0 +1,28 @@
+{
+  "name": "hsu",
+  "version": "0.0.1",
+  "description": "HMAC URL signing middleware for Express/Connect",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/smebberson/hsu.git"
+  },
+  "keywords": [
+    "HMAC",
+    "signed",
+    "signing",
+    "url",
+    "middleware",
+    "express",
+    "connect"
+  ],
+  "author": "Scott Mebberson",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/smebberson/hsu/issues"
+  },
+  "homepage": "https://github.com/smebberson/hsu#readme"
+}
