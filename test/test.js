@@ -22,6 +22,22 @@ describe('HSU is middleware', function () {
 
     });
 
+    it('will sign a URL for you', function (done) {
+
+        var app = createApp(),
+            urlToSign = 'https://www.google.com.au/webhp?sourceid=chrome-instant&ion=1&espv=2&ie=UTF-8#q=npm+hsu',
+            signedUrl;
+
+        app.get('/signed-url', function (req, res, next) {
+            return res.send(req.signUrl(urlToSign));
+        });
+
+        request(createServer(app))
+            .get('/signed-url')
+            .expect(200, urlToSign, done);
+
+    });
+
 });
 
 /**
