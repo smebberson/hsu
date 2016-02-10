@@ -1,13 +1,13 @@
 {
   "name": "hsu",
   "version": "0.0.1",
-  "description": "HMAC URL signing middleware for Express/Connect",
+  "description": "HMAC URL signing middleware for Express",
   "main": "index.js",
   "engines": {
     "node": ">= 4.0"
   },
   "scripts": {
-    "test": "./node_modules/.bin/mocha --trace-deprecation --check-leaks --bail",
+    "test": "./node_modules/.bin/mocha",
     "coverage": "./vagrant/scripts/test-coverage",
     "travis": "./vagrant/scripts/test-travis"
   },
@@ -19,6 +19,7 @@
     "HMAC",
     "signed",
     "signing",
+    "sign",
     "url",
     "middleware",
     "express",
@@ -37,5 +38,10 @@
     "istanbul": "0.4.2",
     "mocha": "2.4.5",
     "supertest": "1.1.0"
+  },
+  "dependencies": {
+    "http-errors": "1.4.0",
+    "rndm": "1.2.0",
+    "scmp": "1.0.0"
   }
 }
