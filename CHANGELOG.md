@@ -3,6 +3,10 @@
 
 All notable changes to HSU will be documented here. This project adheres to [Semantic Versioning](http://semver.org/).
 
+## [2.0.1] - 2016-02-11
+
+- Corrected the license within `package.json`.
+
 ## [2.0.0] - 2016-02-11
 
 ### Breaking
@@ -21,4 +25,4 @@ All notable changes to HSU will be documented here. This project adheres to [Sem
 
 ## [1.0.0] - 2016-02-10
 
-- Created first version
+- Created first version.

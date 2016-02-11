@@ -1,6 +1,6 @@
 {
   "name": "hsu",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "HMAC URL signing middleware for Express",
   "main": "index.js",
   "engines": {
@@ -26,7 +26,7 @@
     "connect"
   ],
   "author": "Scott Mebberson",
-  "license": "ISC",
+  "license": "MIT",
   "bugs": {
     "url": "https://github.com/smebberson/hsu/issues"
   },
