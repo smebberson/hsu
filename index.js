@@ -7,6 +7,22 @@ var url = require('url'),
     rndm = require('rndm');
 
 /**
+* Return a timestamp, optionally passing in extra seconds to add to the timestamp.
+*
+ * @param  {Number} ttl The extra seconds to add to the timestamp
+ * @return {Number}     A timestamp in seconds
+ */
+function now (ttl) {
+
+    if (ttl === undefined || ttl === null) {
+        ttl = 0;
+    }
+
+    return Math.floor(new Date()/1000) + ttl;
+
+}
+
+/**
  * Create a HMAC digest based on a salt, a secret and a string.
  *
  * @param  {String} salt   The salt
@@ -25,12 +41,44 @@ function createDigest (salt, secret, str) {
 }
 
 /**
+ * Given a modified (url.query has been manipulated) URL object (from url.parse())
+ * return a string that matches what `url.path` would, but with correct values.
+ *
+ * @param  {Object} url An object as returned from `url.parse()` with a modified `query` property.
+ * @return {String}     A string of the path (i.e. url.path + url.pathname)
+ */
+function urlPath (url) {
+
+    // update the search, based on the query property
+    url.search = querystring.stringify(url.query);
+
+    // take into consideration empty search property when returning the string
+    return url.pathname + (url.search ? `?${url.search}` : '');
+
+}
+
+/**
+ * Given a modified (url.query has been manipulated) URL object (from url.parse())
+ * return a string that mtaches what `url.path` would, but with correct values.
+ *
+ * @param  {Object} url An object as returned from `url.parse()` with a modified `query` property.
+ * @return {String}     A string of the entire URL (including protocol, domain, pathname, path and search).
+ */
+function urlFormat (url) {
+
+    url.search = querystring.stringify(url.query);
+
+    return url.format();
+
+}
+
+/**
  * Verifies the URL being actioned by Express.
  *
- * @param  {String} path   The path of the URL
- * @param  {String} salt   The salt
- * @param  {String} secret The secret key
- * @return {Boolean}       true for valid, false for invalid
+ * @param  {String} path    The path of the URL
+ * @param  {String} salt    The salt
+ * @param  {String} secret  The secret key
+ * @return {String|Boolean} true for valid, 'invalid' for 'invalid', 'timedout' if the request is too late
  */
 function verifyUrl (path, salt, secret) {
 
@@ -41,13 +89,19 @@ function verifyUrl (path, salt, secret) {
 
     // remove the signature as that isn't part of the signed string
     delete parsedUrl.query.signature;
-    parsedUrl.search = querystring.stringify(parsedUrl.query);
 
     // recreate the digest
-    digest = createDigest(salt, secret, parsedUrl.pathname + (parsedUrl.search ? `?${parsedUrl.search}` : ''));
+    digest = createDigest(salt, secret, urlPath(parsedUrl));
 
-    // verify the newly created digest matches the original
-    return scmp(digest, parsedSignature);
+    // if we don't have the same value, we're unverified
+    if (!scmp(digest, parsedSignature)) {
+        return 'invalid';
+    }
+
+    parsedUrl.query.expires = parseInt(parsedUrl.query.expires) || 0;
+
+    // verify if we're still within the expires timestamp
+    return (now() < parsedUrl.query.expires) ? true : 'timedout';
 
 }
 
@@ -72,6 +126,9 @@ module.exports = function hsu (options) {
     // get session options
     var sessionKey = options.sessionKey || 'session';
 
+    // get ttl options (default to 1 hour)
+    var ttl = parseInt(options.ttl) || 60*60;
+
     // return a function that will scope everything to an id (so we can use this middleware multiple times)
     return function (id) {
 
@@ -89,17 +146,22 @@ module.exports = function hsu (options) {
                     // parse the URL we need to sign
                     var parsedUrl = url.parse(urlToSign, true),
                         salt = rndm(),
-                        digest = createDigest(salt, options.secret, parsedUrl.path);
+                        expires = now(ttl);
+
+                    // update the parsedUrl with the expries value before it is signed
+                    // this protects us from tampering with the value
+                    parsedUrl.query.expires = expires;
+
+                    var digest = createDigest(salt, options.secret, urlPath(parsedUrl));
 
                     // store the salt in the session
                     req[sessionKey][`hsu-${id}`] = salt;
 
                     // now update the url with the information
                     parsedUrl.query.signature = digest;
-                    parsedUrl.search = querystring.stringify(parsedUrl.query);
 
                     // return the updated and signed URL
-                    return parsedUrl.format();
+                    return urlFormat(parsedUrl);
 
                 }
 
@@ -112,9 +174,15 @@ module.exports = function hsu (options) {
                 // a salt should always exist, try and verify the request
                 var verified = verifyUrl(req.originalUrl, req[sessionKey][`hsu-${id}`], options.secret);
 
-                if (!verified) {
+                if (verified === 'invalid') {
                     throw createError(403, 'invalid HMAC digest', {
                         code: 'EBADHMACDIGEST'
+                    });
+                }
+
+                if (verified === 'timedout') {
+                    throw createError(403, 'URL has timed out', {
+                        code: 'ETIMEOUTHMACDIGEST'
                     });
                 }
 
@@ -125,9 +193,7 @@ module.exports = function hsu (options) {
             complete: function hsuCompleteMiddleware (req, res, next) {
 
                 req.hsuComplete = function () {
-
                     delete req[sessionKey][`hsu-${id}`];
-
                 }
 
                 return next();

@@ -43,13 +43,16 @@ describe('HSU', function () {
             secret: '%Y77JjYC9>d#,'
         }),
         tamperedErrorHandler = function (err, req, res, next) {
-
             if (err.code !== 'EBADHMACDIGEST') {
                 return next(err);
             }
-
             res.status(403).end('URL has been tampered with');
-
+        },
+        timedOutErrorHandler = function (err, req, res, next) {
+            if (err.code !== 'ETIMEOUTHMACDIGEST') {
+                return next(err);
+            }
+            res.status(403).end('URL has timed out');
         };
 
     it('must be passed a secret', function () {
@@ -266,7 +269,7 @@ describe('HSU', function () {
                         // try the signed URL on another agent (simulating a new client), it should error
                         createAgent(app)
                         .get(url.parse(signedUrl, true).path)
-                        .expect(403, done);
+                        .expect(403, /tampered/, done);
 
                     });
 
@@ -351,7 +354,61 @@ describe('HSU', function () {
                         // now request the path of the signed url
                         agent
                         .get(url.parse(signedUrl, true).path)
-                        .expect(403, done);
+                        .expect(403, /tampered/, done);
+
+                    })
+
+                });
+
+                it('and will timeout after the specified TTL', function (done) {
+
+                    this.timeout(3000);
+
+                    var shortHsuProtect = hsu({
+                            secret: '%Y77JjYC9>d#,',
+                            ttl: 1
+                        }),
+                        id = rndm(),
+                        app = createApp(),
+                        agent,
+                        urlToSign = 'https://domain.com/reset/fail?user=6dg3tct749fj&ion=1&espv=2',
+                        signedUrl;
+
+                    app.get('/account/reset', shortHsuProtect(id).setup, function (req, res, next) {
+
+                        // let's tamper with the URL
+                        signedUrl = url.parse(req.signUrl(urlToSign), true);
+
+                        res.status(200).end();
+
+                    });
+
+                    app.get('/reset/fail', shortHsuProtect(id).verify, function (req, res, next) {
+                        res.status(200).end();
+                    });
+
+                    app.use(timedOutErrorHandler);
+
+                    agent = createAgent(app);
+
+                    // request to retrieve the signedUrl
+                    agent
+                    .get('/account/reset')
+                    .expect(200, function (err, res) {
+
+                        if (err) {
+                            return done(err);
+                        }
+
+                        // wait three seconds and then request the path of the signed url
+                        setTimeout(function () {
+
+                            // now request the path of the signed url
+                            agent
+                            .get(url.parse(signedUrl, true).path)
+                            .expect(403, /timed out/, done);
+
+                        }, 2000);
 
                     })
 
@@ -528,7 +585,7 @@ describe('HSU', function () {
                                 // try and verify the URL again, it should error
                                 agent
                                 .get(url.parse(signedUrl, true).path)
-                                .expect(403, done);
+                                .expect(403, /tampered/, done);
 
                             })
 
@@ -576,7 +633,7 @@ describe('HSU', function () {
                         // now request the path of the signed url
                         agent
                         .get(url.parse(signedUrl, true).path)
-                        .expect(403, 'URL has been tampered with', done);
+                        .expect(403, /tampered/, done);
 
                     })
 
@@ -663,7 +720,7 @@ describe('HSU', function () {
                             // now request the path of the signed url
                             agent
                             .get(url.parse(signedUrl, true).path)
-                            .expect(403, 'URL has been tampered with', done);
+                            .expect(403, /tampered/, done);
 
                         })
 
@@ -752,7 +809,7 @@ describe('HSU', function () {
                             // now request the path of the signed url
                             agent
                             .get(url.parse(signedUrl, true).path)
-                            .expect(403, 'URL has been tampered with', done);
+                            .expect(403, /tampered/, done);
 
                         })
 

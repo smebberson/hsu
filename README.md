@@ -5,7 +5,7 @@
 [![Build Status](https://travis-ci.org/smebberson/hsu.svg?branch=master)](https://travis-ci.org/smebberson/hsu)
 [![Coverage Status](https://coveralls.io/repos/github/smebberson/hsu/badge.svg?branch=master)](https://coveralls.io/github/smebberson/hsu?branch=master)
 
-Express middleware to generate and verify rolling, HMAC signed URLs. The HMAC digest is verified using information in the users session. Any previous digests are instantly replaced when a new one is created (i.e. rolling). You can have concurrent signed URLs for the same user.
+Express middleware to generate and verify rolling, HMAC signed, timed URLs. The HMAC digest is verified using information in the users session. Any previous digests are instantly replaced when a new one is created (i.e. rolling). You can have concurrent signed URLs for the same user.
 
 There are three stages to HSU:
 
@@ -19,6 +19,7 @@ HSU also aims to meet the following goals:
 - No one should have access to the password reset route (verify stage) unless they have a verifiable signed URL.
 - You should be able to restart the process at anytime, at which point, all previous signed URLs become unusable.
 - One the process has been completed, all previous signed URLs become unusable.
+- A signed URL should only be valid for a limited amount of time (1 hour by default).
 
 ## Install
 
@@ -59,6 +60,10 @@ The `hsu` `options` object can also contain any of the following optional keys:
 ###### sessionKey
 
 Determines which property ('key') on `req` the session object is located. Defaults to `session` (i.e. `req.session`). The salt used to create the HMAC digest is stored and read as `req[sessionKey].hsuSalt`.
+
+###### ttl
+
+The number of seconds the URL should be valid for. Defaults to 1 hour (i.e. 3600 seconds).
 
 ### hsuProtect(id)
 
