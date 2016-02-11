@@ -232,6 +232,10 @@ app.use(function (err, req, res, next) {
 
 ```
 
+## Change log
+
+[Review the change log for all changes.](CHANGELOG.md)
+
 ## License
 
 [MIT](LICENSE.md)
