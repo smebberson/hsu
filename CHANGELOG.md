@@ -3,6 +3,12 @@
 
 All notable changes to HSU will be documented here. This project adheres to [Semantic Versioning](http://semver.org/).
 
+## [2.1.0] - 2016-02-11
+
+### Added
+
+- `ttl` options so that signed URLs are now also timed. By default they expire within one hour.
+
 ## [2.0.1] - 2016-02-11
 
 - Corrected the license within `package.json`.

@@ -1,6 +1,6 @@
 {
   "name": "hsu",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "description": "HMAC URL signing middleware for Express",
   "main": "index.js",
   "engines": {
