@@ -72,42 +72,69 @@ module.exports = function hsu (options) {
     // get session options
     var sessionKey = options.sessionKey || 'session';
 
-    return function hsuMiddleware (req, res, next) {
+    // return a function that will scope everything to an id (so we can use this middleware multiple times)
+    return function (id) {
 
-        // lazy-load our signUrl function
-        req.signUrl = function signUrl (urlToSign) {
-
-            // parse the URL we need to sign
-            var parsedUrl = url.parse(urlToSign, true),
-                salt = rndm(),
-                digest = createDigest(salt, options.secret, parsedUrl.path);
-
-            // store the salt in the session
-            req[sessionKey].hsuSalt = salt;
-
-            // now update the url with the information
-            parsedUrl.query.signature = digest;
-            parsedUrl.search = querystring.stringify(parsedUrl.query);
-
-            // return the updated and signed URL
-            return parsedUrl.format();
-
+        if (!id) {
+            throw Error('You must provide an id for HSU to scope with.');
         }
 
-        // determine if we have a salt and should verify the request
-        if (req[sessionKey].hsuSalt) {
+        return {
 
-            var verified = verifyUrl(req.originalUrl, req[sessionKey].hsuSalt, options.secret);
+            setup: function hsuSetupMiddleware (req, res, next) {
 
-            if (!verified) {
-                throw createError(403, 'invalid HMAC digest', {
-                    code: 'EBADHMACDIGEST'
-                });
+                // lazy-load our signUrl function
+                req.signUrl = function signUrl (urlToSign) {
+
+                    // parse the URL we need to sign
+                    var parsedUrl = url.parse(urlToSign, true),
+                        salt = rndm(),
+                        digest = createDigest(salt, options.secret, parsedUrl.path);
+
+                    // store the salt in the session
+                    req[sessionKey][`hsu-${id}`] = salt;
+
+                    // now update the url with the information
+                    parsedUrl.query.signature = digest;
+                    parsedUrl.search = querystring.stringify(parsedUrl.query);
+
+                    // return the updated and signed URL
+                    return parsedUrl.format();
+
+                }
+
+                return next();
+
+            },
+
+            verify: function hsuVerifyMiddleware (req, res, next) {
+
+                // a salt should always exist, try and verify the request
+                var verified = verifyUrl(req.originalUrl, req[sessionKey][`hsu-${id}`], options.secret);
+
+                if (!verified) {
+                    throw createError(403, 'invalid HMAC digest', {
+                        code: 'EBADHMACDIGEST'
+                    });
+                }
+
+                return next()
+
+            },
+
+            complete: function hsuCompleteMiddleware (req, res, next) {
+
+                req.hsuComplete = function () {
+
+                    delete req[sessionKey][`hsu-${id}`];
+
+                }
+
+                return next();
+
             }
 
         }
-
-        return next();
 
     }
 

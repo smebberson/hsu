@@ -5,6 +5,7 @@ var url = require('url'),
     cookieSession = require('cookie-session'),
     request = require('supertest'),
     expect = require('chai').expect,
+    rndm = require('rndm'),
     hsu = require('../');
 
 /**
@@ -39,8 +40,17 @@ describe('HSU', function () {
 
     // generate our HSU middleware
     var hsuProtect = hsu({
-        secret: '%Y77JjYC9>d#,'
-    });
+            secret: '%Y77JjYC9>d#,'
+        }),
+        tamperedErrorHandler = function (err, req, res, next) {
+
+            if (err.code !== 'EBADHMACDIGEST') {
+                return next(err);
+            }
+
+            res.status(403).end('URL has been tampered with');
+
+        };
 
     it('must be passed a secret', function () {
 
@@ -48,70 +58,241 @@ describe('HSU', function () {
             var middleware = hsu();
         }
 
-        expect(fn).to.throw(Error);
+        expect(fn).to.throw(Error, /secret/);
 
     });
 
-    describe('returns middleware that', function () {
+    describe('returns a scoping function that', function () {
 
-        it('provides a signUrl function', function (done) {
+        it('must be passed an id', function () {
 
-            var app = createApp();
+            var fn = function () {
+                var hsuProtect = hsu({ secret: 'secretvalue' })();
+            };
 
-            app.get('/', function (req, res, next) {
-                return res.send(typeof req.signUrl === 'function');
-            });
-
-            createAgent(app)
-                .get('/')
-                .expect(200, done);
+            expect(fn).to.throw(Error, /id/);
 
         });
 
-        describe('will sign a URL', function () {
+        it('returns three stages of middleware', function () {
 
-            it('and store it in the users session', function (done) {
+            var id = rndm(),
+                hsuProtect = hsu({ secret: 'secretvalue' });
 
-                var app = createApp(),
-                    urlToSign = 'https://domain.com/reset?user=6dg3tct749fj&ion=1&espv=2';
+            expect(hsuProtect(id)).to.have.property('setup');
+            expect(hsuProtect(id)).to.have.property('verify');
+            expect(hsuProtect(id)).to.have.property('complete');
 
-                app.get('/', hsuProtect, function (req, res, next) {
+        });
 
-                    // sign the url
-                    req.signUrl(urlToSign);
+        it('allows multiple instances of HSU to run concurrently', function (done) {
 
-                    // make sure req.session.hsuDigest exists
-                    return res.send(Object.keys(req.session).indexOf('hsuSalt') >= 0);
+            var idOne = rndm(),
+                idTwo = rndm(),
+                app = createApp(),
+                agent,
+                urlToSignOne = '/one?user=6dg3tct749fj&ion=1&espv=2',
+                urlToSignTwo = '/two?user=6dg3tct749fj&ion=1&espv=2',
+                signedUrlOne,
+                signedUrlTwo;
+
+                app.get('/pre/one', hsuProtect(idOne).setup, function (req, res, next) {
+                    signedUrlOne = req.signUrl(urlToSignOne);
+                    res.status(200).end();
+                });
+
+                app.get('/pre/two', hsuProtect(idTwo).setup, function (req, res, next) {
+                    signedUrlTwo = req.signUrl(urlToSignTwo);
+                    res.status(200).end();
+                });
+
+                app.get('/one', hsuProtect(idOne).verify, function (req, res, next) {
+                    res.status(200).end();
+                });
+
+                app.get('/two', hsuProtect(idTwo).verify, function (req, res, next) {
+                    res.status(200).end();
+                });
+
+                agent = createAgent(app);
+
+                // request to retrieve signedUrlOne
+                agent
+                .get('/pre/one')
+                .expect(200, function (err, res) {
+
+                    if (err) {
+                        return done(err);
+                    }
+
+                    // request to retrieve signedUrlTwo
+                    agent
+                    .get('/pre/two')
+                    .expect(200, function (err, res) {
+
+                        // now request signedUrlOne
+                        agent
+                        .get(url.parse(signedUrlTwo, true).path)
+                        .expect(200, function (err, res) {
+
+                            // now request signedUrlTwo
+                            agent
+                            .get(url.parse(signedUrlOne, true).path)
+                            .expect(200, done);
+
+                        });
+                    });
+
 
                 });
 
-                // request to retrieve the signedUrl
+        });
+
+        describe('returns middleware that', function () {
+
+            it('provides a signUrl function', function (done) {
+
+                var id = rndm(),
+                    app = createApp();
+
+                app.get('/', hsuProtect(id).setup, function (req, res, next) {
+                    return res.status(200).send(Object.keys(req).indexOf('signUrl') >= 0 && typeof req.signUrl === 'function');
+                });
+
                 createAgent(app)
+                .get('/')
+                .expect(200, 'true', done);
+
+            });
+
+            describe('will sign a URL', function () {
+
+                it('and store the salt in the users session', function (done) {
+
+                    var id = rndm(),
+                        app = createApp(),
+                        urlToSign = 'https://domain.com/reset?user=6dg3tct749fj&ion=1&espv=2';
+
+                    app.get('/', hsuProtect(id).setup, function (req, res, next) {
+
+                        // sign the url
+                        req.signUrl(urlToSign);
+
+                        // make sure req.session.hsuDigest exists
+                        return res.send(Object.keys(req.session).indexOf(`hsu-${id}`) >= 0);
+
+                    });
+
+                    // request to retrieve the signedUrl
+                    createAgent(app)
                     .get('/')
                     .expect(200, 'true', done);
 
-            });
-
-            it('and verify it', function (done) {
-
-                var app = createApp(),
-                    agent,
-                    urlToSign = 'https://domain.com/reset?user=6dg3tct749fj&ion=1&espv=2',
-                    signedUrl;
-
-                app.get('/account/reset', hsuProtect, function (req, res, next) {
-                    signedUrl = req.signUrl(urlToSign);
-                    res.status(200).end();
                 });
 
-                app.get('/reset', hsuProtect, function (req, res, next) {
-                    res.status(200).end();
+                it('and remove the salt once complete', function (done) {
+
+                    var id = rndm(),
+                        app = createApp(),
+                        agent,
+                        urlToSign = 'https://domain.com/reset?user=6dg3tct749fj&ion=1&espv=2',
+                        signedUrl;
+
+                    app.get('/', hsuProtect(id).setup, function (req, res, next) {
+
+                        // sign the url
+                        signedUrl = req.signUrl(urlToSign);
+
+                        // make sure req.session.hsuDigest exists
+                        return res.send(Object.keys(req.session).indexOf(`hsu-${id}`) >= 0);
+
+                    });
+
+                    app.get('/reset', hsuProtect(id).verify, hsuProtect(id).complete, function (req, res, next) {
+                        // we're done with this HSU
+                        req.hsuComplete();
+                        // the req.session.hsuDigest value should no longer exist
+                        return res.send(Object.keys(req.session).indexOf(`hsu-${id}`) >= 0);
+                    });
+
+                    agent = createAgent(app);
+
+                    // request to retrieve the signedUrl
+                    agent
+                    .get('/')
+                    .expect(200, 'true', function (err, res) {
+
+                        if (err) {
+                            return done(err);
+                        }
+
+                        // complete the process
+                        agent
+                        .get(url.parse(signedUrl, true).path)
+                        .expect(200, 'false', done);
+
+                    });
+
                 });
 
-                agent = createAgent(app);
+                it('will protect the URL', function (done) {
 
-                // request to retrieve the signedUrl
-                agent
+                    var id = rndm(),
+                        app = createApp(),
+                        urlToSign = 'https://domain.com/reset?user=6dg3tct749fj&ion=1&espv=2',
+                        signedUrl;
+
+                    app.get('/reset/account', hsuProtect(id).setup, function (req, res, next) {
+                        // retrieve the signed URL
+                        signedUrl = req.signUrl(urlToSign);
+                        res.status(200).end();
+                    });
+
+                    app.get('/reset', hsuProtect(id).verify, function (req, res, next) {
+                        res.status(200).end();
+                    });
+
+                    app.use(tamperedErrorHandler);
+
+                    // request to retrieve the signedUrl
+                    createAgent(app)
+                    .get('/reset/account')
+                    .expect(200, function (err, res) {
+
+                        if (err) {
+                            return done(err);
+                        }
+
+                        // try the signed URL on another agent (simulating a new client), it should error
+                        createAgent(app)
+                        .get(url.parse(signedUrl, true).path)
+                        .expect(403, done);
+
+                    });
+
+                });
+
+                it('and verify it', function (done) {
+
+                    var id = rndm(),
+                        app = createApp(),
+                        agent,
+                        urlToSign = 'https://domain.com/reset?user=6dg3tct749fj&ion=1&espv=2',
+                        signedUrl;
+
+                    app.get('/account/reset', hsuProtect(id).setup, function (req, res, next) {
+                        signedUrl = req.signUrl(urlToSign);
+                        res.status(200).end();
+                    });
+
+                    app.get('/reset', hsuProtect(id).verify, function (req, res, next) {
+                        res.status(200).end();
+                    });
+
+                    agent = createAgent(app);
+
+                    // request to retrieve the signedUrl
+                    agent
                     .get('/account/reset')
                     .expect(200, function (err, res) {
 
@@ -121,234 +302,398 @@ describe('HSU', function () {
 
                         // now request the path of the signed url
                         agent
+                        .get(url.parse(signedUrl, true).path)
+                        .expect(200, done);
+
+                    });
+
+                });
+
+                it('and 403 upon verification failure', function (done) {
+
+                    var id = rndm(),
+                        app = createApp(),
+                        agent,
+                        urlToSign = 'https://domain.com/reset/fail?user=6dg3tct749fj&ion=1&espv=2',
+                        signedUrl;
+
+                    app.get('/account/reset', hsuProtect(id).setup, function (req, res, next) {
+
+                        // let's tamper with the URL
+                        var tamperedUrl = url.parse(req.signUrl(urlToSign), true);
+
+                        tamperedUrl.query.user += '1';
+                        tamperedUrl.search = querystring.stringify(tamperedUrl.query);
+
+                        signedUrl = tamperedUrl.format();
+
+                        res.status(200).end();
+
+                    });
+
+                    app.get('/reset/fail', hsuProtect(id).verify, function (req, res, next) {
+                        res.status(200).end();
+                    });
+
+                    app.use(tamperedErrorHandler);
+
+                    agent = createAgent(app);
+
+                    // request to retrieve the signedUrl
+                    agent
+                    .get('/account/reset')
+                    .expect(200, function (err, res) {
+
+                        if (err) {
+                            return done(err);
+                        }
+
+                        // now request the path of the signed url
+                        agent
+                        .get(url.parse(signedUrl, true).path)
+                        .expect(403, done);
+
+                    })
+
+                });
+
+                it('will only support one HMAC digest per ID at a time', function (done) {
+
+                    var id = rndm(),
+                        app = createApp(),
+                        agent,
+                        urlToSign = 'https://domain.com/reset?user=6dg3tct749fj&ion=1&espv=2',
+                        signedUrl;
+
+                    app.get('/account/reset', hsuProtect(id).setup, function (req, res, next) {
+
+                        req.signUrl(urlToSign);
+                        signedUrl = req.signUrl(urlToSign);
+                        res.status(200).end();
+
+                    });
+
+                    app.get('/reset', hsuProtect(id).verify, function (req, res, next) {
+                        res.status(200).end();
+                    });
+
+                    agent = createAgent(app);
+
+                    // request to retrieve the signedUrl
+                    agent
+                    .get('/account/reset')
+                    .expect(200, function (err, res) {
+
+                        if (err) {
+                            return done(err);
+                        }
+
+                        // now request the path of the signed url
+                        agent
+                        .get(url.parse(signedUrl, true).path)
+                        .expect(200, done);
+
+                    })
+
+                });
+
+                it('and will allow the process to repeat', function (done) {
+
+                    var id = rndm(),
+                        app = createApp(),
+                        agent,
+                        urlToSign = 'https://domain.com/reset?user=6dg3tct749fj&ion=1&espv=2',
+                        signedUrl;
+
+                    app.get('/reset/account', hsuProtect(id).setup, function (req, res, next) {
+                        // retrieve the signed URL
+                        signedUrl = req.signUrl(urlToSign);
+                        res.status(200).end();
+                    });
+
+                    app.get('/reset', hsuProtect(id).verify, function (req, res, next) {
+                        res.status(200).end();
+                    });
+
+                    app.get('/complete', hsuProtect(id).complete, function (req, res, next) {
+                        // we're done with this HSU
+                        req.hsuComplete();
+                        res.status(200).end();
+                    })
+
+                    app.use(tamperedErrorHandler);
+
+                    agent = createAgent(app);
+
+                    // request to retrieve the signedUrl
+                    agent
+                    .get('/reset/account')
+                    .expect(200, function (err, res) {
+
+                        if (err) {
+                            return done(err);
+                        }
+
+                        // verify the url
+                        agent
+                        .get(url.parse(signedUrl, true).path)
+                        .expect(200, function (err, res) {
+
+                            // complete the process
+                            agent
+                            .get('/complete')
+                            .expect(200, function (err, res) {
+
+                                if (err) {
+                                    return done(err);
+                                }
+
+                                // start the process again, retrieve the signedUrl
+                                // request to retrieve the signedUrl
+                                agent
+                                .get('/reset/account')
+                                .expect(200, function (err, res) {
+
+                                    if (err) {
+                                        return done(err);
+                                    }
+
+                                    // verify the url
+                                    agent
+                                    .get(url.parse(signedUrl, true).path)
+                                    .expect(200, done);
+
+                                });
+
+                            });
+
+
+                        });
+
+                    });
+
+                });
+
+                it('and will 403 if request repeated after completion', function (done) {
+
+                    var id = rndm(),
+                        app = createApp(),
+                        agent,
+                        urlToSign = 'https://domain.com/reset?user=6dg3tct749fj&ion=1&espv=2',
+                        signedUrl;
+
+                    app.get('/reset/account', hsuProtect(id).setup, function (req, res, next) {
+                        // retrieve the signed URL
+                        signedUrl = req.signUrl(urlToSign);
+                        res.status(200).end();
+                    });
+
+                    app.get('/reset', hsuProtect(id).verify, function (req, res, next) {
+                        res.status(200).end();
+                    });
+
+                    app.get('/complete', hsuProtect(id).complete, function (req, res, next) {
+                        // we're done with this HSU
+                        req.hsuComplete();
+                        res.status(200).end();
+                    });
+
+                    app.use(tamperedErrorHandler);
+
+                    agent = createAgent(app);
+
+                    // request to retrieve the signedUrl
+                    agent
+                    .get('/reset/account')
+                    .expect(200, function (err, res) {
+
+                        if (err) {
+                            return done(err);
+                        }
+
+                        // verify the url
+                        agent
+                        .get(url.parse(signedUrl, true).path)
+                        .expect(200, function (err, res) {
+
+                            // complete the process
+                            agent
+                            .get('/complete')
+                            .expect(200, function (err, res) {
+
+                                if (err) {
+                                    return done(err);
+                                }
+
+                                // try and verify the URL again, it should error
+                                agent
+                                .get(url.parse(signedUrl, true).path)
+                                .expect(403, done);
+
+                            })
+
+
+                        });
+
+                    });
+
+                });
+
+                it('and will 403 if a previously signed URL is used', function (done) {
+
+                    var id = rndm(),
+                        app = createApp(),
+                        agent,
+                        urlToSign = 'https://domain.com/reset/fail?user=6dg3tct749fj&ion=1&espv=2',
+                        signedUrl;
+
+                    app.get('/account/reset', hsuProtect(id).setup, function (req, res, next) {
+
+                        signedUrl = req.signUrl(urlToSign);
+                        req.signUrl(urlToSign)
+
+                        res.status(200).end();
+
+                    });
+
+                    app.get('/reset/fail', hsuProtect(id).verify, function (req, res, next) {
+                        res.status(200).end();
+                    });
+
+                    app.use(tamperedErrorHandler);
+
+                    agent = createAgent(app);
+
+                    // request to retrieve the signedUrl
+                    agent
+                    .get('/account/reset')
+                    .expect(200, function (err, res) {
+
+                        if (err) {
+                            return done(err);
+                        }
+
+                        // now request the path of the signed url
+                        agent
+                        .get(url.parse(signedUrl, true).path)
+                        .expect(403, 'URL has been tampered with', done);
+
+                    })
+
+                });
+
+                describe('without a domain', function () {
+
+                    it('and verify it', function (done) {
+
+                        var id = rndm(),
+                            app = createApp(),
+                            agent,
+                            urlToSign = '/reset?user=6dg3tct749fj&ion=1&espv=2',
+                            signedUrl;
+
+                        app.get('/account/reset', hsuProtect(id).setup, function (req, res, next) {
+                            signedUrl = req.signUrl(urlToSign);
+                            res.status(200).end();
+                        });
+
+                        app.get('/reset', hsuProtect(id).verify, function (req, res, next) {
+                            res.status(200).end();
+                        });
+
+                        agent = createAgent(app);
+
+                        // request to retrieve the signedUrl
+                        agent
+                        .get('/account/reset')
+                        .expect(200, function (err, res) {
+
+                            if (err) {
+                                return done(err);
+                            }
+
+                            // now request the path of the signed url
+                            agent
                             .get(url.parse(signedUrl, true).path)
                             .expect(200, done);
 
-                    })
+                        })
 
-            });
+                    });
 
-            it('and 403 upon verification failure', function (done) {
+                    it('and 403 upon verification failure', function (done) {
 
-                var app = createApp(),
-                    agent,
-                    urlToSign = 'https://domain.com/reset/fail?user=6dg3tct749fj&ion=1&espv=2',
-                    signedUrl;
+                        var id = rndm(),
+                            app = createApp(),
+                            agent,
+                            urlToSign = '/reset/fail?user=6dg3tct749fj&ion=1&espv=2',
+                            signedUrl;
 
-                app.get('/account/reset', hsuProtect, function (req, res, next) {
+                        app.get('/account/reset', hsuProtect(id).setup, function (req, res, next) {
 
-                    // let's tamper with the URL
-                    var tamperedUrl = url.parse(req.signUrl(urlToSign), true);
+                            // let's tamper with the URL
+                            var tamperedUrl = url.parse(req.signUrl(urlToSign), true);
 
-                    tamperedUrl.query.user += '1';
-                    tamperedUrl.search = querystring.stringify(tamperedUrl.query);
+                            tamperedUrl.query.user += '1';
+                            tamperedUrl.search = querystring.stringify(tamperedUrl.query);
 
-                    signedUrl = tamperedUrl.format();
+                            signedUrl = tamperedUrl.format();
 
-                    res.status(200).end();
+                            res.status(200).end();
 
-                });
+                        });
 
-                app.get('/reset/fail', hsuProtect, function (req, res, next) {
-                    res.status(200).end();
-                });
+                        app.get('/reset/fail', hsuProtect(id).verify, function (req, res, next) {
+                            res.status(200).end();
+                        });
 
-                app.use(function (err, req, res, next) {
+                        app.use(tamperedErrorHandler);
 
-                    if (err.code !== 'EBADHMACDIGEST') {
-                        return next(err);
-                    }
+                        agent = createAgent(app);
 
-                    res.status(403).end('URL has been tampered with');
-
-                });
-
-                agent = createAgent(app);
-
-                // request to retrieve the signedUrl
-                agent
-                    .get('/account/reset')
-                    .expect(200, function (err, res) {
-
-                        if (err) {
-                            return done(err);
-                        }
-
-                        // now request the path of the signed url
+                        // request to retrieve the signedUrl
                         agent
-                            .get(url.parse(signedUrl, true).path)
-                            .expect(403, done);
+                        .get('/account/reset')
+                        .expect(200, function (err, res) {
 
-                    })
+                            if (err) {
+                                return done(err);
+                            }
 
-            });
-
-            it('will only support one HMAC digest at a time', function (done) {
-
-                var app = createApp(),
-                    agent,
-                    urlToSign = 'https://domain.com/reset?user=6dg3tct749fj&ion=1&espv=2',
-                    signedUrl;
-
-                app.get('/account/reset', hsuProtect, function (req, res, next) {
-
-                    req.signUrl(urlToSign);
-                    signedUrl = req.signUrl(urlToSign);
-                    res.status(200).end();
-
-                });
-
-                app.get('/reset', hsuProtect, function (req, res, next) {
-                    res.status(200).end();
-                });
-
-                agent = createAgent(app);
-
-                // request to retrieve the signedUrl
-                agent
-                    .get('/account/reset')
-                    .expect(200, function (err, res) {
-
-                        if (err) {
-                            return done(err);
-                        }
-
-                        // now request the path of the signed url
-                        agent
-                            .get(url.parse(signedUrl, true).path)
-                            .expect(200, done);
-
-                    })
-
-            });
-
-            it('and will 403 if a previously signed URL is used', function (done) {
-
-                var app = createApp(),
-                    agent,
-                    urlToSign = 'https://domain.com/reset/fail?user=6dg3tct749fj&ion=1&espv=2',
-                    signedUrl;
-
-                app.get('/account/reset', hsuProtect, function (req, res, next) {
-
-                    signedUrl = req.signUrl(urlToSign);
-                    req.signUrl(urlToSign)
-
-                    res.status(200).end();
-
-                });
-
-                app.get('/reset/fail', hsuProtect, function (req, res, next) {
-                    res.status(200).end();
-                });
-
-                app.use(function (err, req, res, next) {
-
-                    if (err.code !== 'EBADHMACDIGEST') {
-                        return next(err);
-                    }
-
-                    res.status(403).end('URL has been tampered with');
-
-                });
-
-                agent = createAgent(app);
-
-                // request to retrieve the signedUrl
-                agent
-                    .get('/account/reset')
-                    .expect(200, function (err, res) {
-
-                        if (err) {
-                            return done(err);
-                        }
-
-                        // now request the path of the signed url
-                        agent
+                            // now request the path of the signed url
+                            agent
                             .get(url.parse(signedUrl, true).path)
                             .expect(403, 'URL has been tampered with', done);
 
-                    })
-
-            });
-
-            describe('without a domain', function () {
-
-                it('and verify it', function (done) {
-
-                    var app = createApp(),
-                        agent,
-                        urlToSign = '/reset?user=6dg3tct749fj&ion=1&espv=2',
-                        signedUrl;
-
-                    app.get('/account/reset', hsuProtect, function (req, res, next) {
-                        signedUrl = req.signUrl(urlToSign);
-                        res.status(200).end();
-                    });
-
-                    app.get('/reset', hsuProtect, function (req, res, next) {
-                        res.status(200).end();
-                    });
-
-                    agent = createAgent(app);
-
-                    // request to retrieve the signedUrl
-                    agent
-                        .get('/account/reset')
-                        .expect(200, function (err, res) {
-
-                            if (err) {
-                                return done(err);
-                            }
-
-                            // now request the path of the signed url
-                            agent
-                                .get(url.parse(signedUrl, true).path)
-                                .expect(200, done);
-
                         })
+
+                    });
 
                 });
 
-                it('and 403 upon verification failure', function (done) {
+                describe('without a querystring', function () {
 
-                    var app = createApp(),
-                        agent,
-                        urlToSign = '/reset/fail?user=6dg3tct749fj&ion=1&espv=2',
-                        signedUrl;
+                    it('and verify it', function (done) {
 
-                    app.get('/account/reset', hsuProtect, function (req, res, next) {
+                        var id = rndm(),
+                            app = createApp(),
+                            agent,
+                            urlToSign = '/reset',
+                            signedUrl;
 
-                        // let's tamper with the URL
-                        var tamperedUrl = url.parse(req.signUrl(urlToSign), true);
+                        app.get('/account/reset', hsuProtect(id).setup, function (req, res, next) {
+                            signedUrl = req.signUrl(urlToSign);
+                            res.status(200).end();
+                        });
 
-                        tamperedUrl.query.user += '1';
-                        tamperedUrl.search = querystring.stringify(tamperedUrl.query);
+                        app.get('/reset', hsuProtect(id).verify, function (req, res, next) {
+                            res.status(200).end();
+                        });
 
-                        signedUrl = tamperedUrl.format();
+                        agent = createAgent(app);
 
-                        res.status(200).end();
-
-                    });
-
-                    app.get('/reset/fail', hsuProtect, function (req, res, next) {
-                        res.status(200).end();
-                    });
-
-                    app.use(function (err, req, res, next) {
-
-                        if (err.code !== 'EBADHMACDIGEST') {
-                            return next(err);
-                        }
-
-                        res.status(403).end('URL has been tampered with');
-
-                    });
-
-                    agent = createAgent(app);
-
-                    // request to retrieve the signedUrl
-                    agent
+                        // request to retrieve the signedUrl
+                        agent
                         .get('/account/reset')
                         .expect(200, function (err, res) {
 
@@ -358,37 +703,45 @@ describe('HSU', function () {
 
                             // now request the path of the signed url
                             agent
-                                .get(url.parse(signedUrl, true).path)
-                                .expect(403, 'URL has been tampered with', done);
+                            .get(url.parse(signedUrl, true).path)
+                            .expect(200, done);
 
                         })
 
-                });
-
-            });
-
-            describe('without a querystring', function () {
-
-                it('and verify it', function (done) {
-
-                    var app = createApp(),
-                        agent,
-                        urlToSign = '/reset',
-                        signedUrl;
-
-                    app.get('/account/reset', hsuProtect, function (req, res, next) {
-                        signedUrl = req.signUrl(urlToSign);
-                        res.status(200).end();
                     });
 
-                    app.get('/reset', hsuProtect, function (req, res, next) {
-                        res.status(200).end();
-                    });
+                    it('and 403 upon verification failure', function (done) {
 
-                    agent = createAgent(app);
+                        var id = rndm(),
+                            app = createApp(),
+                            agent,
+                            urlToSign = '/reset/fail',
+                            signedUrl;
 
-                    // request to retrieve the signedUrl
-                    agent
+                        app.get('/account/reset', hsuProtect(id).setup, function (req, res, next) {
+
+                            // let's tamper with the URL
+                            var tamperedUrl = url.parse(req.signUrl(urlToSign), true);
+
+                            tamperedUrl.query.user += '1';
+                            tamperedUrl.search = querystring.stringify(tamperedUrl.query);
+
+                            signedUrl = tamperedUrl.format();
+
+                            res.status(200).end();
+
+                        });
+
+                        app.get('/reset/fail', hsuProtect(id).verify, function (req, res, next) {
+                            res.status(200).end();
+                        });
+
+                        app.use(tamperedErrorHandler);
+
+                        agent = createAgent(app);
+
+                        // request to retrieve the signedUrl
+                        agent
                         .get('/account/reset')
                         .expect(200, function (err, res) {
 
@@ -398,65 +751,12 @@ describe('HSU', function () {
 
                             // now request the path of the signed url
                             agent
-                                .get(url.parse(signedUrl, true).path)
-                                .expect(200, done);
+                            .get(url.parse(signedUrl, true).path)
+                            .expect(403, 'URL has been tampered with', done);
 
                         })
 
-                });
-
-                it('and 403 upon verification failure', function (done) {
-
-                    var app = createApp(),
-                        agent,
-                        urlToSign = '/reset/fail',
-                        signedUrl;
-
-                    app.get('/account/reset', hsuProtect, function (req, res, next) {
-
-                        // let's tamper with the URL
-                        var tamperedUrl = url.parse(req.signUrl(urlToSign), true);
-
-                        tamperedUrl.query.user += '1';
-                        tamperedUrl.search = querystring.stringify(tamperedUrl.query);
-
-                        signedUrl = tamperedUrl.format();
-
-                        res.status(200).end();
-
                     });
-
-                    app.get('/reset/fail', hsuProtect, function (req, res, next) {
-                        res.status(200).end();
-                    });
-
-                    app.use(function (err, req, res, next) {
-
-                        if (err.code !== 'EBADHMACDIGEST') {
-                            return next(err);
-                        }
-
-                        res.status(403).end('URL has been tampered with');
-
-                    });
-
-                    agent = createAgent(app);
-
-                    // request to retrieve the signedUrl
-                    agent
-                        .get('/account/reset')
-                        .expect(200, function (err, res) {
-
-                            if (err) {
-                                return done(err);
-                            }
-
-                            // now request the path of the signed url
-                            agent
-                                .get(url.parse(signedUrl, true).path)
-                                .expect(403, 'URL has been tampered with', done);
-
-                        })
 
                 });
 
