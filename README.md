@@ -242,6 +242,10 @@ app.use(function (err, req, res, next) {
 
 [Review the change log for all changes.](CHANGELOG.md)
 
+## Contributing
+
+Contributors are welcomed. HSU comes complete with an isolated development environment. You can [read more about contributing to HSU here](CONTRIBUTING.md).
+
 ## License
 
 [MIT](LICENSE.md)
