@@ -3,8 +3,7 @@ var url = require('url'),
     crypto = require('crypto'),
     querystring = require('querystring'),
     scmp = require('scmp'),
-    createError = require('http-errors'),
-    rndm = require('rndm');
+    createError = require('http-errors');
 
 /**
 * Return a timestamp, optionally passing in extra seconds to add to the timestamp.
@@ -145,7 +144,7 @@ module.exports = function hsu (options) {
 
                     // parse the URL we need to sign
                     var parsedUrl = url.parse(urlToSign, true),
-                        salt = rndm(),
+                        salt = req[sessionKey][`hsu-${id}`],
                         expires = now(ttl);
 
                     // update the parsedUrl with the expries value before it is signed
