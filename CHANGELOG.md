@@ -3,6 +3,10 @@
 
 All notable changes to HSU will be documented here. This project adheres to [Semantic Versioning](http://semver.org/).
 
+## Unreleased
+
+- Fixed an issue with password resets.
+
 ## [2.1.0] - 2016-02-11
 
 ### Added
