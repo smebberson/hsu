@@ -145,7 +145,7 @@ module.exports = function hsu (options) {
 
                     // parse the URL we need to sign
                     var parsedUrl = url.parse(urlToSign, true),
-                        salt = rndm(),
+                        salt = (req[sessionKey] && req[sessionKey][`hsu-${id}`]) || rndm(),
                         expires = now(ttl);
 
                     // update the parsedUrl with the expries value before it is signed
